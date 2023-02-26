@@ -20,6 +20,7 @@ from library.train_util import DreamBoothDataset, FineTuningDataset
 
 
 def collate_fn(examples):
+  """只要第一个元素"""
   return examples[0]
 
 
@@ -56,6 +57,7 @@ def train(args):
   tokenizer = train_util.load_tokenizer(args)
 
   # データセットを準備する
+  # 有两种类型的数据集
   if use_dreambooth_method:
     print("Use DreamBooth method.")
     train_dataset = DreamBoothDataset(args.train_batch_size, args.train_data_dir, args.reg_data_dir,
@@ -78,6 +80,7 @@ def train(args):
 
   train_dataset.make_buckets()
 
+  # 调试数据集
   if args.debug_dataset:
     train_util.debug_dataset(train_dataset)
     return
@@ -90,12 +93,15 @@ def train(args):
   accelerator, unwrap_model = train_util.prepare_accelerator(args)
 
   # mixed precisionに対応した型を用意しておき適宜castする
+  # 混合精度
   weight_dtype, save_dtype = train_util.prepare_dtype(args)
 
   # モデルを読み込む
+  # 加载目标模型
   text_encoder, vae, unet, _ = train_util.load_target_model(args, weight_dtype)
 
   # work on low-ram device
+  # 低显存会把除 vae 之外的 text_encoder 和 unet 都放到 GPU 上
   if args.lowram:
     text_encoder.to("cuda")
     unet.to("cuda")
@@ -104,6 +110,7 @@ def train(args):
   train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers)
 
   # 学習を準備する
+  # 缓存 latents
   if cache_latents:
     vae.to(accelerator.device, dtype=weight_dtype)
     vae.requires_grad_(False)
@@ -111,14 +118,17 @@ def train(args):
     with torch.no_grad():
       train_dataset.cache_latents(vae)
     vae.to("cpu")
+    # 将 vae 放到 CPU 上, 并释放显存
     if torch.cuda.is_available():
       torch.cuda.empty_cache()
     gc.collect()
 
   # prepare network
+  # 加载网络模块
   print("import network module:", args.network_module)
   network_module = importlib.import_module(args.network_module)
 
+  # 如果有网络参数, 就用 = 解析 kv 键值对
   net_kwargs = {}
   if args.network_args is not None:
     for net_arg in args.network_args:
@@ -126,18 +136,22 @@ def train(args):
       net_kwargs[key] = value
 
   # if a new network is added in future, add if ~ then blocks for each network (;'∀')
+  # 创建网络
   network = network_module.create_network(1.0, args.network_dim, args.network_alpha, vae, text_encoder, unet, **net_kwargs)
   if network is None:
     return
 
+  # 如果有网络权重, 在这里加载
   if args.network_weights is not None:
     print("load network weights from:", args.network_weights)
     network.load_weights(args.network_weights)
 
+  # 是否训练 unet 和 text_encoder
   train_unet = not args.network_train_text_encoder_only
   train_text_encoder = not args.network_train_unet_only
   network.apply_to(text_encoder, unet, train_text_encoder, train_unet)
 
+  # 梯度检查点, 时间换显存, 用于减少显存占用的
   if args.gradient_checkpointing:
     unet.enable_gradient_checkpointing()
     text_encoder.gradient_checkpointing_enable()
@@ -145,33 +159,38 @@ def train(args):
 
   # 学習に必要なクラスを準備する
   print("prepare optimizer, data loader etc.")
-
+  # 优化器
   trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr)
   optimizer_name, optimizer_args, optimizer = train_util.get_optimizer(args, trainable_params)
 
   # dataloaderを準備する
   # DataLoaderのプロセス数：0はメインプロセスになる
   n_workers = min(args.max_data_loader_n_workers, os.cpu_count() - 1)      # cpu_count-1 ただし最大で指定された数まで
+  # 训练数据加载器
   train_dataloader = torch.utils.data.DataLoader(
       train_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn, num_workers=n_workers, persistent_workers=args.persistent_data_loader_workers)
 
   # 学習ステップ数を計算する
   if args.max_train_epochs is not None:
+    # 通过 epoch 来确定最大训练步数
     args.max_train_steps = args.max_train_epochs * len(train_dataloader)
     print(f"override steps. steps for {args.max_train_epochs} epochs is / 指定エポックまでのステップ数: {args.max_train_steps}")
 
   # lr schedulerを用意する
+  # 学习率调整器
   lr_scheduler = train_util.get_scheduler_fix(args.lr_scheduler, optimizer, num_warmup_steps=args.lr_warmup_steps,
                                               num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
                                               num_cycles=args.lr_scheduler_num_cycles, power=args.lr_scheduler_power)
 
   # 実験的機能：勾配も含めたfp16学習を行う　モデル全体をfp16にする
+  # 开启全 fp16 训练
   if args.full_fp16:
     assert args.mixed_precision == "fp16", "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
     print("enable full fp16 training.")
     network.to(weight_dtype)
 
   # acceleratorがなんかよろしくやってくれるらしい
+  # unet 和 text_encoder 都训练
   if train_unet and train_text_encoder:
     unet, text_encoder, network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, text_encoder, network, optimizer, train_dataloader, lr_scheduler)
@@ -182,6 +201,7 @@ def train(args):
     text_encoder, network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         text_encoder, network, optimizer, train_dataloader, lr_scheduler)
   else:
+    # 都没有是种啥情况, 只训练 network 吗?
     network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         network, optimizer, train_dataloader, lr_scheduler)
 
@@ -202,6 +222,7 @@ def train(args):
     unet.eval()
     text_encoder.eval()
 
+  # 但凡启用 DDP, 就要脱一层, .module 才是真正的模型
   # support DistributedDataParallel
   if type(text_encoder) == DDP:
     text_encoder = text_encoder.module
@@ -210,6 +231,7 @@ def train(args):
 
   network.prepare_grad_etc(text_encoder, unet)
 
+  # 如果启用缓存 latens, 早就在上面做过这三个步骤了
   if not cache_latents:
     vae.requires_grad_(False)
     vae.eval()
@@ -220,6 +242,7 @@ def train(args):
     train_util.patch_accelerator_for_fp16_training(accelerator)
 
   # resumeする
+  # 这个也是恢复训练的参数, 要设置 resume 为 True
   if args.resume is not None:
     print(f"resume training from state: {args.resume}")
     accelerator.load_state(args.resume)
@@ -231,6 +254,7 @@ def train(args):
     args.save_every_n_epochs = math.floor(num_train_epochs / args.save_n_epoch_ratio) or 1
 
   # 学習する
+  # 总的训练批次
   total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
   print("running training / 学習開始")
   print(f"  num train images * repeats / 学習画像の数×繰り返し回数: {train_dataset.num_train_images}")
@@ -242,6 +266,7 @@ def train(args):
   print(f"  gradient accumulation steps / 勾配を合計するステップ数 = {args.gradient_accumulation_steps}")
   print(f"  total optimization steps / 学習ステップ数: {args.max_train_steps}")
 
+  # 一堆元数据, 可以用来检查并复刻模型的
   metadata = {
       "ss_session_id": session_id,            # random integer indicating which group of epochs the model came from
       "ss_training_started_at": training_started_at,          # unix timestamp
@@ -301,14 +326,17 @@ def train(args):
   # for key, value in net_kwargs.items():
   #   metadata["ss_arg_" + key] = value
 
+  # 预训练模型的路径
   if args.pretrained_model_name_or_path is not None:
     sd_model_name = args.pretrained_model_name_or_path
+    # 如果是本地路径的
     if os.path.exists(sd_model_name):
       metadata["ss_sd_model_hash"] = train_util.model_hash(sd_model_name)
       metadata["ss_new_sd_model_hash"] = train_util.calculate_sha256(sd_model_name)
       sd_model_name = os.path.basename(sd_model_name)
     metadata["ss_sd_model_name"] = sd_model_name
 
+  # 有 vae 参数
   if args.vae is not None:
     vae_name = args.vae
     if os.path.exists(vae_name):
@@ -322,14 +350,17 @@ def train(args):
   progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=not accelerator.is_local_main_process, desc="steps")
   global_step = 0
 
+  # 噪音调度器
   noise_scheduler = DDPMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear",
                                   num_train_timesteps=1000, clip_sample=False)
 
+  # 主进程
   if accelerator.is_main_process:
     accelerator.init_trackers("network_train")
 
   loss_list = []
   loss_total = 0.0
+  # 训练过程
   for epoch in range(num_train_epochs):
     print(f"epoch {epoch+1}/{num_train_epochs}")
     train_dataset.set_current_epoch(epoch + 1)
@@ -339,8 +370,10 @@ def train(args):
     network.on_epoch_start(text_encoder, unet)
 
     for step, batch in enumerate(train_dataloader):
+      # accumulate 是累积梯度
       with accelerator.accumulate(network):
         with torch.no_grad():
+          # 读取缓存或者当场编码图片
           if "latents" in batch and batch["latents"] is not None:
             latents = batch["latents"].to(accelerator.device)
           else:
@@ -356,6 +389,7 @@ def train(args):
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents, device=latents.device)
+        # 加点噪音偏移量
         if args.noise_offset:
           # https://www.crosslabs.org//blog/diffusion-with-offset-noise
           noise += args.noise_offset * torch.randn((latents.shape[0], latents.shape[1], 1, 1), device=latents.device)
@@ -366,18 +400,22 @@ def train(args):
 
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
+        # 前向步骤
         noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Predict the noise residual
         with accelerator.autocast():
+          # 使用 unet 预测噪音
           noise_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
 
+        # 这是个啥, v 参数化?
         if args.v_parameterization:
           # v-parameterization training
           target = noise_scheduler.get_velocity(latents, noise, timesteps)
         else:
           target = noise
 
+        # 求损失
         loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="none")
         loss = loss.mean([1, 2, 3])
 
@@ -387,6 +425,7 @@ def train(args):
         loss = loss.mean()                # 平均なのでbatch_sizeで割る必要なし
 
         accelerator.backward(loss)
+        # 裁剪梯度
         if accelerator.sync_gradients and args.max_grad_norm != 0.0:
           params_to_clip = network.get_trainable_params()
           accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
@@ -415,9 +454,11 @@ def train(args):
         logs = generate_step_logs(args, current_loss, avr_loss, lr_scheduler)
         accelerator.log(logs, step=global_step)
 
+      # 跳出训练了
       if global_step >= args.max_train_steps:
         break
 
+    # 有日志目录就记录一下
     if args.logging_dir is not None:
       logs = {"loss/epoch": loss_total / len(loss_list)}
       accelerator.log(logs, step=epoch+1)
@@ -461,6 +502,7 @@ def train(args):
 
   del accelerator                         # この後メモリを使うのでこれは消す
 
+  # 最后保存一把模型
   if is_main_process:
     os.makedirs(args.output_dir, exist_ok=True)
 
