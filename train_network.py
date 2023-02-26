@@ -476,30 +476,43 @@ def train(args):
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
 
+  # 添加不同类型的参数
   train_util.add_sd_models_arguments(parser)
   train_util.add_dataset_arguments(parser, True, True, True)
   train_util.add_training_arguments(parser, True)
   train_util.add_optimizer_arguments(parser)
 
+  # 不要保存元数据在输出模型中
   parser.add_argument("--no_metadata", action='store_true', help="do not save metadata in output model / メタデータを出力先モデルに保存しない")
+  # 输出模型的类型
   parser.add_argument("--save_model_as", type=str, default="safetensors", choices=[None, "ckpt", "pt", "safetensors"],
                       help="format to save the model (default is .safetensors) / モデル保存時の形式（デフォルトはsafetensors）")
 
+  # U-Net 的学习率
   parser.add_argument("--unet_lr", type=float, default=None, help="learning rate for U-Net / U-Netの学習率")
+  # 文本编码器的学习率
   parser.add_argument("--text_encoder_lr", type=float, default=None, help="learning rate for Text Encoder / Text Encoderの学習率")
 
+  # 网络的预训练权重, 感觉需要提供一个路径
   parser.add_argument("--network_weights", type=str, default=None,
                       help="pretrained weights for network / 学習するネットワークの初期重み")
+  # 用于训练的网络模块, 训练 lora 时用 networks.lora
   parser.add_argument("--network_module", type=str, default=None, help='network module to train / 学習対象のネットワークのモジュール')
+  # 网络的维度
   parser.add_argument("--network_dim", type=int, default=None,
                       help='network dimensions (depends on each network) / モジュールの次元数（ネットワークにより定義は異なります）')
+  # 网络的 alpha 值, 不知道是啥
   parser.add_argument("--network_alpha", type=float, default=1,
                       help='alpha for LoRA weight scaling, default 1 (same as network_dim for same behavior as old version) / LoRaの重み調整のalpha値、デフォルト1（旧バージョンと同じ動作をするにはnetwork_dimと同じ値を指定）')
+  # 额外的参数
   parser.add_argument("--network_args", type=str, default=None, nargs='*',
                       help='additional argmuments for network (key=value) / ネットワークへの追加の引数')
+  # 是否只训练 U-Net
   parser.add_argument("--network_train_unet_only", action="store_true", help="only training U-Net part / U-Net関連部分のみ学習する")
+  # 是否只训练文本编码器
   parser.add_argument("--network_train_text_encoder_only", action="store_true",
                       help="only training Text Encoder part / Text Encoder関連部分のみ学習する")
+  # 训练注释
   parser.add_argument("--training_comment", type=str, default=None,
                       help="arbitrary comment string stored in metadata / メタデータに記録する任意のコメント文字列")
 
