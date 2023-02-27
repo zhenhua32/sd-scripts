@@ -1363,10 +1363,13 @@ def replace_unet_cross_attn_to_xformers():
 
 def add_sd_models_arguments(parser: argparse.ArgumentParser):
   # for pretrained models
+  # 是否是 v2 版本的模型
   parser.add_argument("--v2", action='store_true',
                       help='load Stable Diffusion v2.0 model / Stable Diffusion 2.0のモデルを読み込む')
+  # 是否启动 v_parameterization 训练, 不知道具体是啥
   parser.add_argument("--v_parameterization", action='store_true',
                       help='enable v-parameterization training / v-parameterization学習を有効にする')
+  # 预训练模型的名字或路径
   parser.add_argument("--pretrained_model_name_or_path", type=str, default=None,
                       help="pretrained model to train, directory to Diffusers model or StableDiffusion checkpoint / 学習元モデル、Diffusers形式モデルのディレクトリまたはStableDiffusionのckptファイル")
 
@@ -1466,32 +1469,49 @@ def verify_training_args(args: argparse.Namespace):
 
 def add_dataset_arguments(parser: argparse.ArgumentParser, support_dreambooth: bool, support_caption: bool, support_caption_dropout: bool):
   # dataset common
+  # 训练图片的目录
   parser.add_argument("--train_data_dir", type=str, default=None, help="directory for train images / 学習画像データのディレクトリ")
+  # 是否洗牌逗号分隔的 caption, 通常译为字幕或标题
   parser.add_argument("--shuffle_caption", action="store_true",
                       help="shuffle comma-separated caption / コンマで区切られたcaptionの各要素をshuffleする")
+  # 字幕的扩展名, 这里默认是 .caption, 一般要替换成 .txt, 这是用 sd webui 中的图片预处理生成的文件后缀
   parser.add_argument("--caption_extension", type=str, default=".caption", help="extension of caption files / 読み込むcaptionファイルの拡張子")
+  # 这个应该是当时拼错了, 忽略
   parser.add_argument("--caption_extention", type=str, default=None,
                       help="extension of caption files (backward compatibility) / 読み込むcaptionファイルの拡張子（スペルミスを残してあります）")
+  # 当洗牌 caption 时, 是否保留 caption 的前 N 个 token
   parser.add_argument("--keep_tokens", type=int, default=None,
                       help="keep heading N tokens when shuffling caption tokens / captionのシャッフル時に、先頭からこの個数のトークンをシャッフルしないで残す")
+  # 启用弱颜色增强, 应该会导致颜色更鲜艳
   parser.add_argument("--color_aug", action="store_true", help="enable weak color augmentation / 学習時に色合いのaugmentationを有効にする")
+  # 启用水平翻转增强, 水平翻转就是左右镜像
   parser.add_argument("--flip_aug", action="store_true", help="enable horizontal flip augmentation / 学習時に左右反転のaugmentationを有効にする")
+  # 脸部中心切割增强的范围, 例如 2.0,4.0
   parser.add_argument("--face_crop_aug_range", type=str, default=None,
                       help="enable face-centered crop augmentation and its range (e.g. 2.0,4.0) / 学習時に顔を中心とした切り出しaugmentationを有効にするときは倍率を指定する（例：2.0,4.0）")
+  # 启用随机切割, 用于在脸部中心切割增强的风格训练
   parser.add_argument("--random_crop", action="store_true",
                       help="enable random crop (for style training in face-centered crop augmentation) / ランダムな切り出しを有効にする（顔を中心としたaugmentationを行うときに画風の学習用に指定する）")
+  # 检查数据集, 展示图片, 但不训练
   parser.add_argument("--debug_dataset", action="store_true",
                       help="show images for debugging (do not train) / デバッグ用に学習データを画面表示する（学習は行わない）")
+  # 训练图片的分辨率, size 或者 width,height
   parser.add_argument("--resolution", type=str, default=None,
                       help="resolution in training ('size' or 'width,height') / 学習時の画像解像度（'サイズ'指定、または'幅,高さ'指定）")
+  # 启用缓存 latent, 用于减少内存, 但是必须禁用增强
   parser.add_argument("--cache_latents", action="store_true",
                       help="cache latents to reduce memory (augmentations must be disabled) / メモリ削減のためにlatentをcacheする（augmentationは使用不可）")
+  # 启用分桶处理, 用于多比例的图片
   parser.add_argument("--enable_bucket", action="store_true",
                       help="enable buckets for multi aspect ratio training / 複数解像度学習のためのbucketを有効にする")
+  # 最小分桶分辨率
   parser.add_argument("--min_bucket_reso", type=int, default=256, help="minimum resolution for buckets / bucketの最小解像度")
+  # 最大分桶分辨率
   parser.add_argument("--max_bucket_reso", type=int, default=1024, help="maximum resolution for buckets / bucketの最大解像度")
+  # 每个桶的分辨率步长, 一般是 8 的倍数
   parser.add_argument("--bucket_reso_steps", type=int, default=64,
                       help="steps of resolution for buckets, divisible by 8 is recommended / bucketの解像度の単位、8で割り切れる値を推奨します")
+  # 在没有放大图片的基础上进行分桶
   parser.add_argument("--bucket_no_upscale", action="store_true",
                       help="make bucket for each image without upscaling / 画像を拡大せずbucketを作成します")
 
