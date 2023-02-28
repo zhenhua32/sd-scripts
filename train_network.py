@@ -60,6 +60,7 @@ def train(args):
   # 有两种类型的数据集
   if use_dreambooth_method:
     print("Use DreamBooth method.")
+    # 这参数也太多了, 人都看傻了
     train_dataset = DreamBoothDataset(args.train_batch_size, args.train_data_dir, args.reg_data_dir,
                                       tokenizer, args.max_token_length, args.caption_extension, args.shuffle_caption, args.keep_tokens,
                                       args.resolution, args.enable_bucket, args.min_bucket_reso, args.max_bucket_reso,
@@ -67,6 +68,7 @@ def train(args):
                                       args.prior_loss_weight, args.flip_aug, args.color_aug, args.face_crop_aug_range,
                                       args.random_crop, args.debug_dataset)
   else:
+    # TODO: 这个先不看了
     print("Train with captions.")
     train_dataset = FineTuningDataset(args.in_json, args.train_batch_size, args.train_data_dir,
                                       tokenizer, args.max_token_length, args.shuffle_caption, args.keep_tokens,

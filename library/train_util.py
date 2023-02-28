@@ -234,13 +234,16 @@ class BaseDataset(torch.utils.data.Dataset):
     self.dropout_every_n_epochs: int = None
     self.tag_dropout_rate: float = 0
 
-    # augmentation
+    # augmentation 数据增强, 用了 albumentations 这个图像增强库
+    # 如果启用了 flip_aug 即水平翻转
     flip_p = 0.5 if flip_aug else 0.0
     if color_aug:
       # わりと弱めの色合いaugmentation：brightness/contrastあたりは画像のpixel valueの最大値・最小値を変えてしまうのでよくないのではという想定でgamma/hueあたりを触る
       self.aug = albu.Compose([
           albu.OneOf([
+              # 色调饱和度值
               albu.HueSaturationValue(8, 0, 0, p=.5),
+              # 随机伽马值
               albu.RandomGamma((95, 105), p=.5),
           ], p=.33),
           albu.HorizontalFlip(p=flip_p)
@@ -252,29 +255,42 @@ class BaseDataset(torch.utils.data.Dataset):
     else:
       self.aug = None
 
+    # 图片转类型并标准化
     self.image_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5]), ])
 
+    # 图片数据字典
     self.image_data: Dict[str, ImageInfo] = {}
 
+    # 替换字典
     self.replacements = {}
 
   def set_current_epoch(self, epoch):
     self.current_epoch = epoch
 
   def set_caption_dropout(self, dropout_rate, dropout_every_n_epochs, tag_dropout_rate):
+    """
+    更新 caption 的 dropout
+    """
     # コンストラクタで渡さないのはTextual Inversionで意識したくないから（ということにしておく）
     self.dropout_rate = dropout_rate
     self.dropout_every_n_epochs = dropout_every_n_epochs
     self.tag_dropout_rate = tag_dropout_rate
 
   def set_tag_frequency(self, dir_name, captions):
+    """
+    设置 tag 频率
+    """
     frequency_for_dir = self.tag_frequency.get(dir_name, {})
     self.tag_frequency[dir_name] = frequency_for_dir
     for caption in captions:
+      # 对于每个 tag
       for tag in caption.split(","):
+        tag: str
         if tag and not tag.isspace():
+          # 转小写
           tag = tag.lower()
           frequency = frequency_for_dir.get(tag, 0)
+          # 该 tag 的频率加一
           frequency_for_dir[tag] = frequency + 1
 
   def disable_token_padding(self):
@@ -1507,6 +1523,9 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
 
 
 def verify_training_args(args: argparse.Namespace):
+  """
+  验证训练参数冲突
+  """
   if args.v_parameterization and not args.v2:
     print("v_parameterization should be with v2 / v1でv_parameterizationを使用することは想定されていません")
   if args.v2 and args.clip_skip is not None:
@@ -1846,15 +1865,20 @@ def get_scheduler_fix(
 
 
 def prepare_dataset_args(args: argparse.Namespace, support_metadata: bool):
+  """
+  准备数据集的参数
+  """
   # backward compatibility
   if args.caption_extention is not None:
     args.caption_extension = args.caption_extention
     args.caption_extention = None
 
+  # 验证参数冲突
   if args.cache_latents:
     assert not args.color_aug, "when caching latents, color_aug cannot be used / latentをキャッシュするときはcolor_augは使えません"
     assert not args.random_crop, "when caching latents, random_crop cannot be used / latentをキャッシュするときはrandom_cropは使えません"
 
+  # 解析分辨率参数
   # assert args.resolution is not None, f"resolution is required / resolution（解像度）を指定してください"
   if args.resolution is not None:
     args.resolution = tuple([int(r) for r in args.resolution.split(',')])
@@ -1863,6 +1887,7 @@ def prepare_dataset_args(args: argparse.Namespace, support_metadata: bool):
     assert len(args.resolution) == 2, \
         f"resolution must be 'size' or 'width,height' / resolution（解像度）は'サイズ'または'幅','高さ'で指定してください: {args.resolution}"
 
+  # face_crop_aug_range 需要是两个浮点数, 且第一个值小于第二个
   if args.face_crop_aug_range is not None:
     args.face_crop_aug_range = tuple([float(r) for r in args.face_crop_aug_range.split(',')])
     assert len(args.face_crop_aug_range) == 2 and args.face_crop_aug_range[0] <= args.face_crop_aug_range[1], \
@@ -1876,6 +1901,9 @@ def prepare_dataset_args(args: argparse.Namespace, support_metadata: bool):
 
 
 def load_tokenizer(args: argparse.Namespace):
+  """
+  加载 tokenizer
+  """
   print("prepare tokenizer")
   if args.v2:
     tokenizer = CLIPTokenizer.from_pretrained(V2_STABLE_DIFFUSION_PATH, subfolder="tokenizer")
