@@ -1362,6 +1362,9 @@ def replace_unet_cross_attn_to_xformers():
 # region arguments
 
 def add_sd_models_arguments(parser: argparse.ArgumentParser):
+  """
+  sd models 相关的参数
+  """
   # for pretrained models
   # 是否是 v2 版本的模型
   parser.add_argument("--v2", action='store_true',
@@ -1375,6 +1378,10 @@ def add_sd_models_arguments(parser: argparse.ArgumentParser):
 
 
 def add_optimizer_arguments(parser: argparse.ArgumentParser):
+  """
+  优化器相关的参数
+  """
+  # 优化器类型
   parser.add_argument("--optimizer_type", type=str, default="",
                       help="Optimizer to use / オプティマイザの種類: AdamW (default), AdamW8bit, Lion, SGDNesterov, SGDNesterov8bit, DAdaptation, AdaFactor")
 
@@ -1384,78 +1391,117 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
   parser.add_argument("--use_lion_optimizer", action="store_true",
                       help="use Lion optimizer (requires lion-pytorch) / Lionオプティマイザを使う（ lion-pytorch のインストールが必要）")
 
+  # 学习率
   parser.add_argument("--learning_rate", type=float, default=2.0e-6, help="learning rate / 学習率")
+  # 最大梯度裁剪
   parser.add_argument("--max_grad_norm", default=1.0, type=float,
                       help="Max gradient norm, 0 for no clipping / 勾配正規化の最大norm、0でclippingを行わない")
 
+  # 优化器的参数
   parser.add_argument("--optimizer_args", type=str, default=None, nargs='*',
                       help="additional arguments for optimizer (like \"weight_decay=0.01 betas=0.9,0.999 ...\") / オプティマイザの追加引数（例： \"weight_decay=0.01 betas=0.9,0.999 ...\"）")
 
+  # 学习率调度器
   parser.add_argument("--lr_scheduler", type=str, default="constant",
                       help="scheduler to use for learning rate / 学習率のスケジューラ: linear, cosine, cosine_with_restarts, polynomial, constant (default), constant_with_warmup, adafactor")
+  # 学习率预热步数
   parser.add_argument("--lr_warmup_steps", type=int, default=0,
                       help="Number of steps for the warmup in the lr scheduler (default is 0) / 学習率のスケジューラをウォームアップするステップ数（デフォルト0）")
+  # 余弦学习率调度器的重启次数
   parser.add_argument("--lr_scheduler_num_cycles", type=int, default=1,
                       help="Number of restarts for cosine scheduler with restarts / cosine with restartsスケジューラでのリスタート回数")
+  # 多项式调度器的多项式幂
   parser.add_argument("--lr_scheduler_power", type=float, default=1,
                       help="Polynomial power for polynomial scheduler / polynomialスケジューラでのpolynomial power")
 
 
 def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: bool):
+  """
+  训练相关的参数
+  """
+  # 模型输出目录
   parser.add_argument("--output_dir", type=str, default=None,
                       help="directory to output trained model / 学習後のモデル出力先ディレクトリ")
+  # 输出模型的名字
   parser.add_argument("--output_name", type=str, default=None,
                       help="base name of trained model file / 学習後のモデルの拡張子を除くファイル名")
+  # 保存模型时使用的精度
   parser.add_argument("--save_precision", type=str, default=None,
                       choices=[None, "float", "fp16", "bf16"], help="precision in saving / 保存時に精度を変更して保存する")
+  # 每 N 个 epoch 保存一次模型
   parser.add_argument("--save_every_n_epochs", type=int, default=None,
                       help="save checkpoint every N epochs / 学習中のモデルを指定エポックごとに保存する")
+  # 以固定的间隔保存 N 个模型版本
   parser.add_argument("--save_n_epoch_ratio", type=int, default=None,
                       help="save checkpoint N epoch ratio (for example 5 means save at least 5 files total) / 学習中のモデルを指定のエポック割合で保存する（たとえば5を指定すると最低5個のファイルが保存される）")
+  # 保存最新的 N 个模型版本
   parser.add_argument("--save_last_n_epochs", type=int, default=None, help="save last N checkpoints / 最大Nエポック保存する")
+  # 保存最新的 N 个模型版本的 checkpoints
   parser.add_argument("--save_last_n_epochs_state", type=int, default=None,
                       help="save last N checkpoints of state (overrides the value of --save_last_n_epochs)/ 最大Nエポックstateを保存する(--save_last_n_epochsの指定を上書きします)")
+  # 额外保存模型的训练状态, 比如优化器的状态
   parser.add_argument("--save_state", action="store_true",
                       help="save training state additionally (including optimizer states etc.) / optimizerなど学習状態も含めたstateを追加で保存する")
+  # 保存状态, 以便恢复训练
   parser.add_argument("--resume", type=str, default=None, help="saved state to resume training / 学習再開するモデルのstate")
 
+  # 训练的 batch_size
   parser.add_argument("--train_batch_size", type=int, default=1, help="batch size for training / 学習時のバッチサイズ")
+  # 本编码器的最大 token 长度
   parser.add_argument("--max_token_length", type=int, default=None, choices=[None, 150, 225],
                       help="max token length of text encoder (default for 75, 150 or 225) / text encoderのトークンの最大長（未指定で75、150または225が指定可）")
+  # 对于 CrossAttention 使用节省显存的 attention
   parser.add_argument("--mem_eff_attn", action="store_true",
                       help="use memory efficient attention for CrossAttention / CrossAttentionに省メモリ版attentionを使う")
+  # 对 CrossAttention 使用 xformers
   parser.add_argument("--xformers", action="store_true",
                       help="use xformers for CrossAttention / CrossAttentionにxformersを使う")
+  # vae 的路径, 用于替换原有的 vae
   parser.add_argument("--vae", type=str, default=None,
                       help="path to checkpoint of vae to replace / VAEを入れ替える場合、VAEのcheckpointファイルまたはディレクトリ")
 
+  # 最大训练步数
   parser.add_argument("--max_train_steps", type=int, default=1600, help="training steps / 学習ステップ数")
+  # 最大训练 epoch 数
   parser.add_argument("--max_train_epochs", type=int, default=None,
                       help="training epochs (overrides max_train_steps) / 学習エポック数（max_train_stepsを上書きします）")
+  # DataLoader 的最大工作线程数
   parser.add_argument("--max_data_loader_n_workers", type=int, default=8,
                       help="max num workers for DataLoader (lower is less main RAM usage, faster epoch start and slower data loading) / DataLoaderの最大プロセス数（小さい値ではメインメモリの使用量が減りエポック間の待ち時間が減りますが、データ読み込みは遅くなります）")
+  # 持久持有 DataLoader 的工作线程, 以减少 epoch 之间的时间浪费, 但可能会消耗更多的内存
   parser.add_argument("--persistent_data_loader_workers", action="store_true",
                       help="persistent DataLoader workers (useful for reduce time gap between epoch, but may use more memory) / DataLoader のワーカーを持続させる (エポック間の時間差を少なくするのに有効だが、より多くのメモリを消費する可能性がある)")
+  # 固定种子
   parser.add_argument("--seed", type=int, default=None, help="random seed for training / 学習時の乱数のseed")
+  # 梯度检查点
   parser.add_argument("--gradient_checkpointing", action="store_true",
                       help="enable gradient checkpointing / grandient checkpointingを有効にする")
+  # 梯度累计步数
   parser.add_argument("--gradient_accumulation_steps", type=int, default=1,
                       help="Number of updates steps to accumulate before performing a backward/update pass / 学習時に逆伝播をする前に勾配を合計するステップ数")
+  # 使用混合精度
   parser.add_argument("--mixed_precision", type=str, default="no",
                       choices=["no", "fp16", "bf16"], help="use mixed precision / 混合精度を使う場合、その精度")
+  # 全程使用 fp16, 包括梯度
   parser.add_argument("--full_fp16", action="store_true", help="fp16 training including gradients / 勾配も含めてfp16で学習する")
+  # 跳过 clip 的最后 N 层
   parser.add_argument("--clip_skip", type=int, default=None,
                       help="use output of nth layer from back of text encoder (n>=1) / text encoderの後ろからn番目の層の出力を用いる（nは1以上）")
+  # 日志目录
   parser.add_argument("--logging_dir", type=str, default=None,
                       help="enable logging and output TensorBoard log to this directory / ログ出力を有効にしてこのディレクトリにTensorBoard用のログを出力する")
+  # 日志目录的前缀
   parser.add_argument("--log_prefix", type=str, default=None, help="add prefix for each log directory / ログディレクトリ名の先頭に追加する文字列")
+  # 启用噪音偏移
   parser.add_argument("--noise_offset", type=float, default=None,
                       help="enable noise offset with this value (if enabled, around 0.1 is recommended) / Noise offsetを有効にしてこの値を設定する（有効にする場合は0.1程度を推奨）")
+  # 开启低内存模式, 通常用于 Colab 和 Kaggle 等内存较小且显存够大的环境
   parser.add_argument("--lowram", action="store_true",
                       help="enable low RAM optimization. e.g. load models to VRAM instead of RAM (for machines which have bigger VRAM than RAM such as Colab and Kaggle) / メインメモリが少ない環境向け最適化を有効にする。たとえばVRAMにモデルを読み込むなど（ColabやKaggleなどRAMに比べてVRAMが多い環境向け）")
 
   if support_dreambooth:
     # DreamBooth training
+    # 正则化图片的权重
     parser.add_argument("--prior_loss_weight", type=float, default=1.0,
                         help="loss weight for regularization images / 正則化画像のlossの重み")
 
@@ -1468,6 +1514,9 @@ def verify_training_args(args: argparse.Namespace):
 
 
 def add_dataset_arguments(parser: argparse.ArgumentParser, support_dreambooth: bool, support_caption: bool, support_caption_dropout: bool):
+  """
+  数据集相关的参数
+  """
   # dataset common
   # 训练图片的目录
   parser.add_argument("--train_data_dir", type=str, default=None, help="directory for train images / 学習画像データのディレクトリ")
@@ -1515,30 +1564,42 @@ def add_dataset_arguments(parser: argparse.ArgumentParser, support_dreambooth: b
   parser.add_argument("--bucket_no_upscale", action="store_true",
                       help="make bucket for each image without upscaling / 画像を拡大せずbucketを作成します")
 
+  # 下面三个选项在 train_network.py 中都是 True
   if support_caption_dropout:
     # Textual Inversion はcaptionのdropoutをsupportしない
     # いわゆるtensorのDropoutと紛らわしいのでprefixにcaptionを付けておく　every_n_epochsは他と平仄を合わせてdefault Noneに
+    # caption 的 dropout 率
     parser.add_argument("--caption_dropout_rate", type=float, default=0,
                         help="Rate out dropout caption(0.0~1.0) / captionをdropoutする割合")
+    # 每 N 个 epoch 进行一次 caption dropout, 丢弃掉所有的 caption
     parser.add_argument("--caption_dropout_every_n_epochs", type=int, default=None,
                         help="Dropout all captions every N epochs / captionを指定エポックごとにdropoutする")
+    # 丢弃逗号分隔的 token 的概率
     parser.add_argument("--caption_tag_dropout_rate", type=float, default=0,
                         help="Rate out dropout comma separated tokens(0.0~1.0) / カンマ区切りのタグをdropoutする割合")
 
   if support_dreambooth:
     # DreamBooth dataset
+    # 正则化目录
     parser.add_argument("--reg_data_dir", type=str, default=None, help="directory for regularization images / 正則化画像データのディレクトリ")
 
   if support_caption:
     # caption dataset
+    # 数据集的 json 元数据, 这个字段是用来在训练 lora 时判断是否是 dreambooth_method 的 use_dreambooth_method = args.in_json is None
     parser.add_argument("--in_json", type=str, default=None, help="json metadata for dataset / データセットのmetadataのjsonファイル")
+    # 数据集的重复次数
     parser.add_argument("--dataset_repeats", type=int, default=1,
                         help="repeat dataset when training with captions / キャプションでの学習時にデータセットを繰り返す回数")
 
 
 def add_sd_saving_arguments(parser: argparse.ArgumentParser):
+  """
+  模型保存相关的参数
+  """
+  # 模型的保存格式
   parser.add_argument("--save_model_as", type=str, default=None, choices=[None, "ckpt", "safetensors", "diffusers", "diffusers_safetensors"],
                       help="format to save the model (default is same to original) / モデル保存時の形式（未指定時は元モデルと同じ）")
+  # 是否使用 safetensors 格式保存模型
   parser.add_argument("--use_safetensors", action='store_true',
                       help="use safetensors format to save (if save_model_as is not specified) / checkpoint、モデルをsafetensors形式で保存する（save_model_as未指定時）")
 
