@@ -206,6 +206,7 @@ class BaseDataset(torch.utils.data.Dataset):
     self.tokenizer: CLIPTokenizer = tokenizer
     self.max_token_length = max_token_length
     self.shuffle_caption = shuffle_caption
+    # shuffle_keep_tokens 是用来保留前 N 个 token 不被打乱的
     self.shuffle_keep_tokens = shuffle_keep_tokens
     # width/height is used when enable_bucket==False
     self.width, self.height = (None, None) if resolution is None else resolution
@@ -300,15 +301,22 @@ class BaseDataset(torch.utils.data.Dataset):
     self.replacements[str_from] = str_to
 
   def process_caption(self, caption):
+    """
+    处理 caption
+    """
     # dropoutの決定：tag dropがこのメソッド内にあるのでここで行うのが良い
+    # 是否进行 dropout. 先判断随机概率是否大于 dropout_rate
     is_drop_out = self.dropout_rate > 0 and random.random() < self.dropout_rate
+    # 再判断是否在每 N 个 epoch 进行一次 dropout
     is_drop_out = is_drop_out or self.dropout_every_n_epochs and self.current_epoch % self.dropout_every_n_epochs == 0
 
+    # 直接不用处理了, 置为空
     if is_drop_out:
       caption = ""
     else:
       if self.shuffle_caption or self.tag_dropout_rate > 0:
         def dropout_tags(tokens):
+          """丢弃部分 tags"""
           if self.tag_dropout_rate <= 0:
             return tokens
           l = []
@@ -317,13 +325,17 @@ class BaseDataset(torch.utils.data.Dataset):
               l.append(token)
           return l
 
+        # 获取所有的 tokens
         tokens = [t.strip() for t in caption.strip().split(",")]
+        # 打乱 tokens
         if self.shuffle_keep_tokens is None:
           if self.shuffle_caption:
             random.shuffle(tokens)
 
+          # 概率丢弃部分 tags
           tokens = dropout_tags(tokens)
         else:
+          # 如果数量大于 shuffle_keep_tokens, 则保留 shuffle_keep_tokens 个 tokens, 其余的打乱
           if len(tokens) > self.shuffle_keep_tokens:
             keep_tokens = tokens[:self.shuffle_keep_tokens]
             tokens = tokens[self.shuffle_keep_tokens:]
@@ -334,17 +346,21 @@ class BaseDataset(torch.utils.data.Dataset):
             tokens = dropout_tags(tokens)
 
             tokens = keep_tokens + tokens
+        # 重新拼接 caption
         caption = ", ".join(tokens)
 
       # textual inversion対応
+      # 支持 textual inversion
       for str_from, str_to in self.replacements.items():
         if str_from == "":
           # replace all
+          # 直接替换了整个 caption, 一种是从 str_to 随机选择一个, 一种是直接替换成 str_to
           if type(str_to) == list:
             caption = random.choice(str_to)
           else:
             caption = str_to
         else:
+          # 替换掉
           caption = caption.replace(str_from, str_to)
 
     return caption
