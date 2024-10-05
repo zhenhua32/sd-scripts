@@ -70,23 +70,28 @@ def denoise(
     model: flux_models.Flux,
     img: torch.Tensor,
     img_ids: torch.Tensor,
-    txt: torch.Tensor,
+    txt: torch.Tensor,  # t5_out
     txt_ids: torch.Tensor,
-    vec: torch.Tensor,
+    vec: torch.Tensor,  # l_pooled
     timesteps: list[float],
     guidance: float = 4.0,
     t5_attn_mask: Optional[torch.Tensor] = None,
-    neg_txt: Optional[torch.Tensor] = None,
-    neg_vec: Optional[torch.Tensor] = None,
+    neg_txt: Optional[torch.Tensor] = None,  # neg_t5_out
+    neg_vec: Optional[torch.Tensor] = None,  # neg_l_pooled
     neg_t5_attn_mask: Optional[torch.Tensor] = None,
     cfg_scale: Optional[float] = None,
 ):
+    """
+    去噪声的过程
+    """
     # this is ignored for schnell
     logger.info(f"guidance: {guidance}, cfg_scale: {cfg_scale}")
+    # 原来是在这里用的 guidance
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
 
     # prepare classifier free guidance
     if neg_txt is not None and neg_vec is not None:
+        # 有负面提示词时, 需要拼接
         b_img_ids = torch.cat([img_ids, img_ids], dim=0)
         b_txt_ids = torch.cat([txt_ids, txt_ids], dim=0)
         b_txt = torch.cat([neg_txt, txt], dim=0)
@@ -102,6 +107,7 @@ def denoise(
         b_vec = vec
         b_t5_attn_mask = t5_attn_mask
 
+    # 对每个时间点进行迭代
     for t_curr, t_prev in zip(tqdm(timesteps[:-1]), timesteps[1:]):
         t_vec = torch.full((b_img_ids.shape[0],), t_curr, dtype=img.dtype, device=img.device)
 
@@ -114,19 +120,22 @@ def denoise(
         pred = model(
             img=b_img,
             img_ids=b_img_ids,
-            txt=b_txt,
+            txt=b_txt,  # t5_out
             txt_ids=b_txt_ids,
-            y=b_vec,
+            y=b_vec,  # l_pooled
             timesteps=t_vec,
             guidance=guidance_vec,
             txt_attention_mask=b_t5_attn_mask,
         )
 
         # classifier free guidance
+        # cfg_scale 仅对负面提示词有效
         if neg_txt is not None and neg_vec is not None:
             pred_uncond, pred = torch.chunk(pred, 2, dim=0)
+            # 原来是这样实现的
             pred = pred_uncond + cfg_scale * (pred - pred_uncond)
 
+        # 更新图片
         img = img + (t_prev - t_curr) * pred
 
     return img
@@ -151,12 +160,18 @@ def do_sample(
     neg_t5_attn_mask: Optional[torch.Tensor] = None,
     cfg_scale: Optional[float] = None,
 ):
+    """
+    采样的流程
+    """
     logger.info(f"num_steps: {num_steps}")
+    # 获取时间点
     timesteps = get_schedule(num_steps, img.shape[1], shift=not is_schnell)
+    print(f"timesteps: {timesteps}")
 
     # denoise initial noise
     if accelerator:
         with accelerator.autocast(), torch.no_grad():
+            # 调用去噪的过程
             x = denoise(
                 model,
                 img,
