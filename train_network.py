@@ -26,6 +26,9 @@ def collate_fn(examples):
 
 # TODO 他のスクリプトと共通化する
 def generate_step_logs(args: argparse.Namespace, current_loss, avr_loss, lr_scheduler):
+  """
+  生成每步的训练日志
+  """
   logs = {"loss/current": current_loss, "loss/average": avr_loss}
 
   if args.network_train_unet_only:

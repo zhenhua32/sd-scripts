@@ -228,6 +228,7 @@ class BaseDataset(torch.utils.data.Dataset):
     self.bucket_no_upscale = None
     self.bucket_info = None                                           # for metadata
 
+    # 分词器的最大长度
     self.tokenizer_max_length = self.tokenizer.model_max_length if max_token_length is None else max_token_length + 2
 
     self.current_epoch: int = 0            # インスタンスがepochごとに新しく作られるようなので外側から渡さないとダメ
@@ -369,6 +370,7 @@ class BaseDataset(torch.utils.data.Dataset):
     input_ids = self.tokenizer(caption, padding="max_length", truncation=True,
                                max_length=self.tokenizer_max_length, return_tensors="pt").input_ids
 
+    # 如果超过了分词器的最大长度, 还要处理一番
     if self.tokenizer_max_length > self.tokenizer.model_max_length:
       input_ids = input_ids.squeeze(0)
       iids_list = []
@@ -1644,6 +1646,9 @@ def add_sd_saving_arguments(parser: argparse.ArgumentParser):
 
 
 def get_optimizer(args, trainable_params):
+  """
+  基于 name 获取优化器
+  """
   # "Optimizer to use: AdamW, AdamW8bit, Lion, SGDNesterov, SGDNesterov8bit, DAdaptation, Adafactor"
 
   optimizer_type = args.optimizer_type
