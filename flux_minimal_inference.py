@@ -207,10 +207,13 @@ def generate_image(
     negative_prompt: Optional[str],
     cfg_scale: float,
 ):
+    """
+    调用模型生图的入口
+    """
     seed = seed if seed is not None else random.randint(0, 2**32 - 1)
     logger.info(f"Seed: {seed}")
 
-    # make first noise with packed shape
+    # make first noise with packed shape 第一步, 生成 latent
     # original: b,16,2*h//16,2*w//16, packed: b,h//16*w//16,16*2*2
     packed_latent_height, packed_latent_width = math.ceil(image_height / 16), math.ceil(image_width / 16)
     noise_dtype = torch.float32 if is_fp8(dtype) else dtype
@@ -222,6 +225,7 @@ def generate_image(
         dtype=noise_dtype,
         generator=torch.Generator(device=device).manual_seed(seed),
     )
+    print(f"latent noise shape: {noise.shape}")
 
     # prepare img and img ids
 
@@ -232,9 +236,11 @@ def generate_image(
 
     # txt2img only needs img_ids
     img_ids = flux_utils.prepare_img_ids(1, packed_latent_height, packed_latent_width)
+    print(f"img_ids shape: {img_ids.shape}")
 
     # prepare fp8 models
     if is_fp8(clip_l_dtype) and (not hasattr(clip_l, "fp8_prepared") or not clip_l.fp8_prepared):
+        # clip_l.text_model.embeddings 要保持为 bfloat16
         logger.info(f"prepare CLIP-L for fp8: set to {clip_l_dtype}, set embeddings to {torch.bfloat16}")
         clip_l.to(clip_l_dtype)  # fp8
         clip_l.text_model.embeddings.to(dtype=torch.bfloat16)
@@ -262,6 +268,7 @@ def generate_image(
                     module.to(target_dtype)
                 if module.__class__.__name__ in ["T5DenseGatedActDense"]:
                     # print("set", module.__class__.__name__, "hooks")
+                    # 这啥操作, 直接替换了 forward 函数?
                     module.forward = forward_hook(module)
 
         t5xxl.to(t5xxl_dtype)
@@ -276,6 +283,7 @@ def generate_image(
     def encode(prpt: str):
         tokens_and_masks = tokenize_strategy.tokenize(prpt)
         with torch.no_grad():
+            # 调用 clip_l
             if is_fp8(clip_l_dtype):
                 with accelerator.autocast():
                     l_pooled, _, _, _ = encoding_strategy.encode_tokens(
@@ -287,6 +295,7 @@ def generate_image(
                         tokenize_strategy, [clip_l, None], tokens_and_masks
                     )
 
+            # 调用 t5xxl
             if is_fp8(t5xxl_dtype):
                 with accelerator.autocast():
                     _, t5_out, txt_ids, t5_attn_mask = encoding_strategy.encode_tokens(
@@ -297,8 +306,13 @@ def generate_image(
                     _, t5_out, txt_ids, t5_attn_mask = encoding_strategy.encode_tokens(
                         tokenize_strategy, [None, t5xxl], tokens_and_masks, args.apply_t5_attn_mask
                     )
+        print(
+            f"l_pooled shape: {l_pooled.shape}, t5_out shape: {t5_out.shape}, \
+              txt_ids shape: {txt_ids.shape}, t5_attn_mask shape: {t5_attn_mask.shape}"
+        )
         return l_pooled, t5_out, txt_ids, t5_attn_mask
 
+    # 正面 prompt
     l_pooled, t5_out, txt_ids, t5_attn_mask = encode(prompt)
     if negative_prompt:
         neg_l_pooled, neg_t5_out, _, neg_t5_attn_mask = encode(negative_prompt)
@@ -311,6 +325,7 @@ def generate_image(
     if torch.isnan(t5_out).any():
         raise ValueError("NaN in t5_out")
 
+    # 用完丢到 CPU 上
     if args.offload:
         clip_l = clip_l.cpu()
         t5xxl = t5xxl.cpu()
@@ -321,11 +336,12 @@ def generate_image(
     logger.info("Generating image...")
     model = model.to(device)
     if steps is None:
-        steps = 4 if is_schnell else 50
+        steps = 4 if is_schnell else 20
 
     img_ids = img_ids.to(device)
     t5_attn_mask = t5_attn_mask.to(device) if args.apply_t5_attn_mask else None
 
+    # 采样阶段
     x = do_sample(
         accelerator,
         model,
@@ -352,9 +368,11 @@ def generate_image(
 
     # unpack
     x = x.float()
+    print(f"x shape: {x.shape}")
     x = einops.rearrange(
         x, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=packed_latent_height, w=packed_latent_width, ph=2, pw=2
     )
+    print(f"x shape: {x.shape}")
 
     # decode
     logger.info("Decoding image...")
@@ -366,11 +384,13 @@ def generate_image(
         else:
             with torch.autocast(device_type=device.type, dtype=ae_dtype):
                 x = ae.decode(x)
+    print(f"x shape: {x.shape}")
     if args.offload:
         ae = ae.cpu()
 
+    # 转成图片
     x = x.clamp(-1, 1)
-    x = x.permute(0, 2, 3, 1)
+    x = x.permute(0, 2, 3, 1)  # BCHW -> BHWC
     img = Image.fromarray((127.5 * (x + 1.0)).float().cpu().numpy().astype(np.uint8)[0])
 
     # save image
@@ -393,10 +413,30 @@ if __name__ == "__main__":
     device = get_preferred_device()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ckpt_path", type=str, required=True)
-    parser.add_argument("--clip_l", type=str, required=False)
-    parser.add_argument("--t5xxl", type=str, required=False)
-    parser.add_argument("--ae", type=str, required=False)
+    parser.add_argument(
+        "--ckpt_path",
+        type=str,
+        required=False,
+        default=r"G:\code\ai\ComfyUI_windows_portable\ComfyUI\models\unet\flux1-dev-fp8-e4m3fn.safetensors",
+    )
+    parser.add_argument(
+        "--clip_l",
+        type=str,
+        required=False,
+        default=r"G:\code\ai\ComfyUI_windows_portable\ComfyUI\models\clip\clip_l.safetensors",
+    )
+    parser.add_argument(
+        "--t5xxl",
+        type=str,
+        required=False,
+        default=r"G:\code\ai\ComfyUI_windows_portable\ComfyUI\models\clip\t5xxl_fp16.safetensors",
+    )
+    parser.add_argument(
+        "--ae",
+        type=str,
+        required=False,
+        default=r"G:\code\ai\ComfyUI_windows_portable\ComfyUI\models\vae\ae.safetensors",
+    )
     parser.add_argument("--apply_t5_attn_mask", action="store_true")
     parser.add_argument("--prompt", type=str, default="A photo of a cat")
     parser.add_argument("--output_dir", type=str, default=".")
@@ -404,7 +444,7 @@ if __name__ == "__main__":
     parser.add_argument("--clip_l_dtype", type=str, default=None, help="dtype for clip_l")
     parser.add_argument("--ae_dtype", type=str, default=None, help="dtype for ae")
     parser.add_argument("--t5xxl_dtype", type=str, default=None, help="dtype for t5xxl")
-    parser.add_argument("--flux_dtype", type=str, default=None, help="dtype for flux")
+    parser.add_argument("--flux_dtype", type=str, default="fp8", help="dtype for flux")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--steps", type=int, default=None, help="Number of steps. Default is 4 for schnell, 50 for dev")
     parser.add_argument("--guidance", type=float, default=3.5)
@@ -446,6 +486,7 @@ if __name__ == "__main__":
 
     use_fp8 = [is_fp8(d) for d in [dtype, clip_l_dtype, t5xxl_dtype, ae_dtype, flux_dtype]]
     if any(use_fp8):
+        # 使用 fp8 时, 需要初始化 accelerate
         accelerator = accelerate.Accelerator(mixed_precision="bf16")
     else:
         accelerator = None
@@ -484,7 +525,7 @@ if __name__ == "__main__":
     # if is_fp8(ae_dtype):
     #     ae = accelerator.prepare(ae)
 
-    # LoRA
+    # LoRA 加载
     lora_models: List[lora_flux.LoRANetwork] = []
     for weights_file in args.lora_weights:
         if ";" in weights_file:
@@ -495,6 +536,7 @@ if __name__ == "__main__":
 
         weights_sd = load_file(weights_file)
         is_lora = is_oft = False
+        # 两种格式, 一种是 lora, 一种是 oft (Orthogonal Finetuning)
         for key in weights_sd.keys():
             if key.startswith("lora"):
                 is_lora = True
@@ -520,6 +562,7 @@ if __name__ == "__main__":
         lora_models.append(lora_model)
 
     if not args.interactive:
+        # 非交互模式, 直接生图就结束了
         generate_image(
             model,
             clip_l,
