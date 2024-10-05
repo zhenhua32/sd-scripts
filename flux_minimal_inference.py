@@ -1,4 +1,7 @@
 # Minimum Inference Code for FLUX
+"""
+看看推理流程, 熟悉每个阶段的输入和输出
+"""
 
 import argparse
 import datetime
@@ -275,10 +278,14 @@ def generate_image(
         with torch.no_grad():
             if is_fp8(clip_l_dtype):
                 with accelerator.autocast():
-                    l_pooled, _, _, _ = encoding_strategy.encode_tokens(tokenize_strategy, [clip_l, None], tokens_and_masks)
+                    l_pooled, _, _, _ = encoding_strategy.encode_tokens(
+                        tokenize_strategy, [clip_l, None], tokens_and_masks
+                    )
             else:
                 with torch.autocast(device_type=device.type, dtype=clip_l_dtype):
-                    l_pooled, _, _, _ = encoding_strategy.encode_tokens(tokenize_strategy, [clip_l, None], tokens_and_masks)
+                    l_pooled, _, _, _ = encoding_strategy.encode_tokens(
+                        tokenize_strategy, [clip_l, None], tokens_and_masks
+                    )
 
             if is_fp8(t5xxl_dtype):
                 with accelerator.autocast():
@@ -345,7 +352,9 @@ def generate_image(
 
     # unpack
     x = x.float()
-    x = einops.rearrange(x, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=packed_latent_height, w=packed_latent_width, ph=2, pw=2)
+    x = einops.rearrange(
+        x, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=packed_latent_height, w=packed_latent_width, ph=2, pw=2
+    )
 
     # decode
     logger.info("Decoding image...")
@@ -495,7 +504,9 @@ if __name__ == "__main__":
                 break
 
         module = lora_flux if is_lora else oft_flux
-        lora_model, _ = module.create_network_from_weights(multiplier, None, ae, [clip_l, t5xxl], model, weights_sd, True)
+        lora_model, _ = module.create_network_from_weights(
+            multiplier, None, ae, [clip_l, t5xxl], model, weights_sd, True
+        )
 
         if args.merge_lora_weights:
             lora_model.merge_to([clip_l, t5xxl], model, weights_sd)
@@ -574,6 +585,8 @@ if __name__ == "__main__":
                 except ValueError as e:
                     logger.error(f"Invalid option: {opt}, {e}")
 
-            generate_image(model, clip_l, t5xxl, ae, prompt, seed, width, height, steps, guidance, negative_prompt, cfg_scale)
+            generate_image(
+                model, clip_l, t5xxl, ae, prompt, seed, width, height, steps, guidance, negative_prompt, cfg_scale
+            )
 
     logger.info("Done!")
